@@ -218,7 +218,8 @@ class Decoder(Thread):
     def decode(self, article, data, raw_data):
         # Do we have SABYenc? Let it do all the work
         if sabnzbd.decoder.SABYENC_ENABLED:
-            decoded_data, output_filename, crc, crc_expected, crc_correct = sabyenc.decode_usenet_chunks(raw_data, article.bytes)
+            decoded_data, output_filename, article.part_begin, article.part_end, crc, crc_expected, crc_correct = \
+                sabyenc.decode_usenet_chunks(raw_data, article.bytes)
 
             # Assume it is yenc
             article.nzf.type = 'yenc'

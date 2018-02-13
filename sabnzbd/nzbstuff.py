@@ -112,7 +112,7 @@ class TryList(object):
 # Article
 ##############################################################################
 ArticleSaver = (
-    'article', 'art_id', 'bytes', 'partnum', 'lowest_partnum', 'nzf'
+    'article', 'art_id', 'bytes', 'part_begin', 'part_end', 'partnum', 'lowest_partnum', 'nzf'
 )
 
 
@@ -127,6 +127,8 @@ class Article(TryList):
         self.article = article
         self.art_id = None
         self.bytes = bytes
+        self.part_begin = None
+        self.part_end = None
         self.partnum = partnum
         self.lowest_partnum = False
         self.tries = 0  # Try count
@@ -224,10 +226,10 @@ class Article(TryList):
 # NzbFile
 ##############################################################################
 NzbFileSaver = (
-    'date', 'subject', 'filename', 'filename_checked', 'type', 'is_par2', 'vol',
-    'blocks', 'setname', 'articles', 'decodetable', 'bytes', 'bytes_left',
-    'article_count', 'nzo', 'nzf_id', 'deleted', 'valid', 'import_finished',
-    'md5sum', 'md5of16k'
+    'date', 'subject', 'filename', 'filename_checked', 'filepath', 'type',
+    'is_par2', 'vol', 'blocks', 'setname', 'articles', 'decodetable', 'bytes',
+    'bytes_left', 'article_count', 'nzo', 'nzf_id', 'deleted', 'valid',
+    'import_finished', 'md5sum', 'md5of16k', 'assembly_started'
 )
 
 
@@ -245,6 +247,7 @@ class NzbFile(TryList):
         self.type = None
         self.filename = name_extractor(subject)
         self.filename_checked = False
+        self.filepath = None
 
         self.is_par2 = False
         self.vol = None
@@ -266,6 +269,8 @@ class NzbFile(TryList):
 
         self.md5sum = None
         self.md5of16k = None
+
+        self.assembly_started = None
 
         self.valid = bool(article_db)
 
