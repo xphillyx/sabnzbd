@@ -47,7 +47,7 @@ from sabnzbd.misc import to_units, cat_to_opts, cat_convert, sanitize_foldername
     get_unique_path, get_admin_path, remove_all, sanitize_filename, globber_full, \
     int_conv, set_permissions, format_time_string, long_path, trim_win_path, \
     fix_unix_encoding, calc_age, is_obfuscated_filename, get_ext, get_filename, \
-    get_unique_filename, renamer, remove_file, remove_dir, caller_name
+    get_filepath, get_unique_filename, renamer, remove_file, remove_dir, caller_name
 from sabnzbd.decorators import synchronized
 import sabnzbd.config as config
 import sabnzbd.cfg as cfg
@@ -236,7 +236,7 @@ NzbFileSaver = (
 class NzbFile(TryList):
     """ Representation of one file consisting of multiple articles """
      # Pre-define attributes to save memory
-    __slots__ = NzbFileSaver
+    __slots__ = NzbFileSaver + ('md5',)
 
     def __init__(self, date, subject, article_db, bytes, nzo):
         """ Setup object """
@@ -267,6 +267,7 @@ class NzbFile(TryList):
         self.valid = False
         self.import_finished = False
 
+        self.md5 = None
         self.md5sum = None
         self.md5of16k = None
 
@@ -321,8 +322,7 @@ class NzbFile(TryList):
             self.articles.remove(article)
             if found:
                 self.bytes_left -= article.bytes
-
-        return (not self.articles)
+        return len(self.articles)
 
     def set_par2(self, setname, vol, blocks):
         """ Designate this this file as a par2 file """
@@ -344,6 +344,15 @@ class NzbFile(TryList):
         for art in self.articles:
             art.reset_try_list()
         self.reset_try_list()
+
+    def prepare_filepath(self):
+        """ Do all checks before making the final path """
+        if not self.filepath:
+            self.nzo.verify_nzf_filename(self)
+            filename = sanitize_filename(self.filename)
+            self.filepath = get_filepath(long_path(cfg.download_dir.get_path()), self.nzo, filename)
+            self.filename = get_filename(self.filepath)
+        return self.filepath
 
     @property
     def completed(self):
@@ -375,6 +384,9 @@ class NzbFile(TryList):
                 # Handle new attributes
                 setattr(self, item, None)
         TryList.__setstate__(self, dict_.get('try_list', []))
+
+        # Set non-transferable values
+        self.md5 = None
 
     def __repr__(self):
         return "<NzbFile: filename=%s, type=%s>" % (self.filename, self.type)
@@ -1154,7 +1166,8 @@ class NzbObject(TryList):
                 self.verify_all_filenames_and_resort()
 
         # Remove from file-tracking
-        file_done = nzf.remove_article(article, found)
+        articles_left = nzf.remove_article(article, found)
+        file_done = not articles_left
 
         # Only on fully loaded files we can say if it's really done
         if not nzf.import_finished:
@@ -1196,7 +1209,7 @@ class NzbObject(TryList):
             self.status = Status.QUEUED
             self.set_download_report()
 
-        return (file_done, post_done)
+        return (articles_left, file_done, post_done)
 
     @synchronized(NZO_LOCK)
     def remove_saved_article(self, article):

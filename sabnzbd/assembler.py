@@ -28,9 +28,8 @@ from time import sleep
 import hashlib
 
 import sabnzbd
-from sabnzbd.misc import get_filepath, sanitize_filename, get_unique_filename, renamer, \
-    set_permissions, long_path, clip_path, has_win_device, get_all_passwords, diskspace, \
-    get_filename, get_ext
+from sabnzbd.misc import renamer, set_permissions, long_path, clip_path, \
+    has_win_device, get_all_passwords, diskspace, get_filename, get_ext
 from sabnzbd.constants import Status, GIGI
 import sabnzbd.cfg as cfg
 from sabnzbd.articlecache import ArticleCache
@@ -67,11 +66,12 @@ class Assembler(Thread):
                 logging.info("Shutting down")
                 break
 
-            nzo, nzf = job
+            nzo, nzf, file_done = job
 
             if nzf:
-                # Check if enough disk space is free, if not pause downloader and send email
-                if diskspace(force=True)['download_dir'][1] < (cfg.download_free.get_float() + nzf.bytes) / GIGI:
+                # Check if enough disk space is free after each file is done
+                # If not enough space left, pause downloader and send email
+                if file_done and diskspace(force=True)['download_dir'][1] < (cfg.download_free.get_float() + nzf.bytes) / GIGI:
                     # Only warn and email once
                     if not sabnzbd.downloader.Downloader.do.paused:
                         logging.warning(T('Too little diskspace forcing PAUSE'))
@@ -86,16 +86,13 @@ class Assembler(Thread):
                     sleep(30)
                     continue
 
-                # Prepare filename
-                nzo.verify_nzf_filename(nzf)
-                nzf.filename = sanitize_filename(nzf.filename)
-                filepath = get_filepath(long_path(cfg.download_dir.get_path()), nzo, nzf.filename)
-                nzf.filename = get_filename(filepath)
+                # Prepare filepath
+                filepath = nzf.prepare_filepath()
 
                 if filepath:
-                    logging.info('Decoding %s %s', filepath, nzf.type)
+                    logging.debug('Decoding part of %s', filepath)
                     try:
-                        filepath = self.assemble(nzf, filepath)
+                        self.assemble(nzf, file_done)
                     except IOError, (errno, strerror):
                         # If job was deleted or in active post-processing, ignore error
                         if not nzo.deleted and not nzo.is_gone() and not nzo.pp_active:
@@ -113,7 +110,12 @@ class Assembler(Thread):
                         logging.error(T('Fatal error in Assembler'), exc_info=True)
                         break
 
+                    # Continue after partly written data
+                    if not file_done:
+                        continue
+
                     # Clean-up admin data
+                    logging.info('Decoding finished %s', filepath)
                     nzf.remove_admin()
 
                     # Do rar-related processing
@@ -161,37 +163,55 @@ class Assembler(Thread):
                 sabnzbd.nzbqueue.NzbQueue.do.remove(nzo.nzo_id, add_to_history=False, cleanup=False)
                 PostProcessor.do.process(nzo)
 
-    def assemble(self, nzf, path):
-        """ Assemble a NZF from its table of articles """
-        md5 = hashlib.md5()
-        fout = open(path, 'ab')
-        decodetable = nzf.decodetable
+    def assemble(self, nzf, file_done):
+        """ Assemble a NZF from its table of articles
+        1) Partial decode, decode whatever we can
+        2a) Job finished, assemlbly not started. Start from 0
+        2a) Job finished, assembly started. Fill in last holes
+        """
+        # Can only seek in already created file
+        if nzf.assembly_started:
+            fmode = 'r+b'
+        else:
+            fmode = 'wb'
 
-        for articlenum in decodetable:
-            # Break if deleted during writing
-            if nzf.nzo.status is Status.DELETED:
-                break
+        # New hash-object needed?
+        if not nzf.md5:
+            nzf.md5 = hashlib.md5()
 
-            # Sleep to allow decoder/assembler switching
-            sleep(0.0001)
-            article = decodetable[articlenum]
+        with open(nzf.filepath, fmode) as fout:
+            decodetable = nzf.decodetable
+            for articlenum in decodetable:
+                # Break if deleted during writing
+                if nzf.nzo.status is Status.DELETED:
+                    break
 
-            data = ArticleCache.do.load_article(article)
+                article = decodetable[articlenum]
 
-            if not data:
-                logging.info(T('%s missing'), article)
-            else:
-                # yenc data already decoded, flush it out
-                fout.write(data)
-                md5.update(data)
+                # See if location info is available
+                if article.part_begin:
+                    # We seek to that place
+                    fout.seek(article.part_begin-1)
 
-        fout.flush()
-        fout.close()
-        set_permissions(path)
-        nzf.md5sum = md5.digest()
-        del md5
+                # If location-info or file is fully done without ever
+                # being direct-writen, only then we can get data from the cache
+                if article.part_begin or (file_done and not nzf.assembly_started):
+                    data = ArticleCache.do.load_article(article)
+                    if not data:
+                        logging.info(T('%s missing'), article)
+                    else:
+                        # yenc data already decoded, flush it out
+                        fout.write(data)
+                        nzf.md5.update(data)
 
-        return path
+                        # Clear it, now it's written
+                        article.part_begin = None
+
+        # Final steps
+        nzf.assembly_started = True
+        if file_done:
+            set_permissions(nzf.filepath)
+            nzf.md5sum = nzf.md5.digest()
 
 
 def file_has_articles(nzf):
