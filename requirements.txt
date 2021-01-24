@@ -3,10 +3,10 @@ cheetah3>=3.0.0
 cryptography
 feedparser>=6.0.0
 configobj
-cheroot
 cherrypy
 portend
 chardet
+lxml
 notify2
 
 # Windows system integration

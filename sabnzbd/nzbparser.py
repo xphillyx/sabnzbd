@@ -31,12 +31,14 @@ from sabnzbd import filesystem, nzbstuff
 from sabnzbd.encoding import utob, correct_unknown_encoding
 from sabnzbd.filesystem import is_archive, get_filename
 from sabnzbd.misc import name_to_cat
+import lxml.etree
 
 
 def nzbfile_parser(raw_data, nzo):
     # Load data as file-object
     raw_data = raw_data.replace("http://www.newzbin.com/DTD/2003/nzb", "", 1)
-    nzb_tree = xml.etree.ElementTree.fromstring(raw_data)
+    # nzb_tree = xml.etree.ElementTree.fromstring(raw_data)
+    nzb_tree = lxml.etree.fromstring(utob(raw_data))
 
     # Hash for dupe-checking
     md5sum = hashlib.md5()
